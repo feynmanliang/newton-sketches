@@ -6,31 +6,16 @@ from numpy import random
 from scipy import linalg
 from scipy import optimize
 
-#np.random.seed(42)
+np.random.seed(42)
 
-# def objective(x):
-#     return (x[0] - 10.0)**2 + (x[1] + 5.0)**2
-
-# jac, hess = gh(objective)
-
-# x0 = np.array([24, 17])
-# bnds = ((0, None), (0, None))
-# method = 'Newton-CG'
-# res = optimize.minimize(objective, x0, method=method, jac=jac, hess=hess, bounds=bnds,
-#                options={'disp': True})
-
-# print(res.x)  # optimal parameter values
-# print(res.fun)  # optimal objective
-# print(res.jac)  # gradient at optimum
-
-def plot_region(A, b):
+def plot_region(ax, A, b):
     # Construct lines
     x = np.linspace(0, 20, 2000)
 
     y = []
     for i in range(np.size(A, 0)):
         y.append((b[i] - A[i,0]*x) / A[i,1])
-        plt.plot(x, y[i])
+        ax.plot(x, y[i])
     y = np.array(y)
 
     # y >= 2
@@ -43,10 +28,10 @@ def plot_region(A, b):
     y4 = 2 * x -5
 
     # Make plot
-    plt.xlim((0, 16))
-    plt.ylim((0, 11))
-    plt.xlabel(r'$x$')
-    plt.ylabel(r'$y$')
+    ax.set_xlim((2.5, 13))
+    ax.set_ylim((1, 9))
+    ax.set_xlabel(r'$x$')
+    ax.set_ylabel(r'$y$')
 
     # Fill feasible region
     # mins = np.min(y, axis=0)
@@ -76,14 +61,13 @@ A = X[:,0:2]
 b = X[:,2]
 n = np.size(A, 0) # NOTE: must be power of 2 for hadamard
 d = np.size(A, 1)
-m = 8
 
 c = np.array([-3, -1], dtype=float)
 
 def log_barrier_obj(x, tau):
     return tau * anp.dot(c, x) - anp.sum(anp.log(b - anp.dot(A, x)))
 
-def sketched_hess_sqrt(x):
+def sketched_hess_sqrt(x, m):
     R = np.diag(random.binomial(1, 0.5, size=n))
     H = linalg.hadamard(n)
     S = np.sqrt(n/m) * \
@@ -100,7 +84,7 @@ def compute_traj(hess_fn):
     x = np.array([8, 5], dtype=float)
     tau = 1e-8
     jac = grad(lambda x: log_barrier_obj(x, tau))
-    for _ in range(250):
+    for _ in range(300):
         path.append(x)
         while True:
             SH = hess_fn(x)
@@ -111,23 +95,33 @@ def compute_traj(hess_fn):
         tau *= 1.1
     return np.array(path)
 
-
-
-
-def plot_path(path, color):
+def plot_path(ax, path, color, label):
     x = path[:,0]
     y = path[:,1]
-    plt.quiver(x[:-1], y[:-1], x[1:]-x[:-1], y[1:]-y[:-1], scale_units='xy', angles='xy', scale=1, width=0.003, color=color)
+    ax.quiver(x[:-1], y[:-1], x[1:]-x[:-1], y[1:]-y[:-1],
+            scale_units='xy', angles='xy', scale=1, width=0.003, color=color, label=label)
 
 lp_opt = optimize.linprog(c, A, b)
 ip_path = compute_traj(hess_sqrt)
-ip_sketch_path = compute_traj(sketched_hess_sqrt)
 
-plt.figure(0)
-plot_region(A, b)
-plot_path(ip_path, 'r')
-plot_path(ip_sketch_path, 'b')
-plt.plot(lp_opt.x[0], lp_opt.x[1], 'g*')
+fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(12, 8))
+for row, m in enumerate([2, 4, 8, 16]):
+    for trial in range(3):
+        ax = axes[row][trial]
+        plot_region(ax, A, b)
+        ip_sketch_path = compute_traj(lambda x: sketched_hess_sqrt(x, m))
+        ax.plot(lp_opt.x[0], lp_opt.x[1], 'g*', markersize=3)
+        plot_path(ax, ip_path, 'r', label="Exact Newton")
+        plot_path(ax, ip_sketch_path, 'b', label="Newton Sketch")
+
+        if row == 0:
+            ax.set_title('Trial {}'.format(trial))
+        if trial == 0:
+            ax.set_ylabel('m = {}'.format(m))
+        if row == 3 and trial == 2:
+            handles, labels = ax.get_legend_handles_labels()
+            fig.legend(handles, labels, loc='upper center')
+fig.tight_layout()
 plt.show()
 
 plt.figure(1)
@@ -136,11 +130,14 @@ plt.semilogy(
         ip_path.dot(c) - lp_opt.fun,
         label="Exact Hessian")
 
-plt.semilogy(
-        np.arange(ip_sketch_path.shape[0]),
-        ip_sketch_path.dot(c) - lp_opt.fun,
-        label="Sketched Hessian"
-)
+for m in [2, 4, 8, 16]:
+    print(m)
+    ip_sketch_path = np.array([compute_traj(lambda x: sketched_hess_sqrt(x, m)) for _ in range(10)]).mean(axis=0)
+    plt.semilogy(
+            np.arange(ip_sketch_path.shape[0]),
+            ip_sketch_path.dot(c) - lp_opt.fun,
+            label="Sketched Hessian (10 trial average, m = {})".format(m)
+    )
 plt.legend()
 plt.grid()
 plt.show()
