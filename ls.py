@@ -84,6 +84,7 @@ ax.set_xlabel('d')
 ax.set_xticks(pos + width / 2)
 ax.set_xticklabels(df.index)
 ax.legend()
+plt.grid(True)
 
 plt.savefig("ls.pdf", dpi=150)
 plt.show()

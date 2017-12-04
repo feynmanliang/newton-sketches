@@ -20,8 +20,8 @@ def safe_log_one_plus_exp(y):
         return np.log(1 + np.exp(y))
 
 def logddpsi(u):
-    return u - 2*safe_log_one_plus_exp(u)
-    #return u - 2*np.log(1 + np.exp(u))
+    #return u - 2*safe_log_one_plus_exp(u)
+    return u - 2*np.log(1 + np.exp(u))
 
 def sketched_hess_sqrt(x, m, A):
     hess_sqrt = A.transpose() * np.exp(0.5 * logddpsi(A.dot(x)))
@@ -40,9 +40,16 @@ def ihs(fun, x0, jac, m, A, args=(), callback=None, **options):
         try:
             step = linalg.solve(SH.transpose().dot(SH), jac(x))
             stepped_fun = fun(x - step)
-            if (stepped_fun < prev_fun):
-                prev_fun = stepped_fun
-                x = x - step
+            newton_dec = np.dot(jac(x), step)
+            mu = 1
+            stepped_fun = fun(x - mu*step)
+            while stepped_fun > prev_fun + 0.1 * mu * newton_dec:
+                mu *= 0.5
+                stepped_fun = fun(x - mu*step)
+            prev_fun = stepped_fun
+            x = x - mu * step
+            if mu * newton_dec < 1e-2:
+                break
         except:
             continue
         cb(x)
@@ -58,11 +65,11 @@ if __name__ == "__main__":
     random.seed(42)
 
     d = 100
-    n = 2 ** 15 # 16 => 65536
+    n = 2 ** 16 # 16 => 65536
     m = 4*d # for ROS IHS
 
     plt.rc('text', usetex=True)
-    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(12, 8))
+    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(8, 12))
 
     for row, rho in enumerate([0.0, 0.7, 0.9]):
         # generate problem
@@ -120,6 +127,8 @@ if __name__ == "__main__":
             ax = axes[row][1]
             ax.semilogy(clock_time, obj_trace,
                     label=method, marker=markers[i])
+            if method is "IHS":
+                ax.set_xlim([0, clock_time[-1]])
             ax.set_title(r'Optimality vs time, $\rho=${}'.format(rho))
             ax.set_xlabel("Wall clock time (seconds)")
             ax.set_ylabel("Optimality gap")

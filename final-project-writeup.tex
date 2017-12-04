@@ -1,0 +1,163 @@
+\documentclass[12pt,letterpaper,boxed]{article}
+
+\usepackage[backend=bibtex8,style=numeric-comp]{biblatex}
+\addbibresource{refs.bib}
+
+% hide default headers
+\newcommand{\name}[1]{}
+\newcommand{\class}[1]{}
+
+\input{../preamble.tex}
+
+\begin{document}
+
+\title{EE227BT final project: sketched second order optimization}
+\author{Feynman Liang (\#3032101515)}
+\date{\today}
+
+\maketitle
+
+\begin{abstract}
+  Second-order methods, which exploit the Hessian in addition to the gradient,
+  has the potential to converge faster, provide less manual parameter tuning,
+  and offer stronger theoretical guarantees. However, as Hessians for many problems
+  of interest can be large and computationally intractable to naively invert,
+  the applicability of second-order methods is less broad.
+  One promising work-around is to leverage sketching, a technique from
+  random matrix theory grounded in concentration of measure, in order to
+  trade off between computational cost and the precision of results.
+  In this work, we consider the use of sketching methods in second order
+  optimization algorithms.
+  Specifically, we investigate \emph{iterative Hessian sketching} (IHS) \cite{pilanci2016iterative}
+  and show: (1) IHS is more accurate than the na\"ive sketching approach to least-squares,
+  (2) IHS can be used as a sub-routine within an interior point method to solve,
+  and (3) the performance of IHS is comparable to state of the art optimization algorithms
+  on a large-scale logistic regression problem.
+\end{abstract}
+
+\section{Introduction}
+
+\section{Theory}
+
+Our project only considers sketching matrices for \emph{randomized orthonormal systems} (ROS).
+This method is desirable because the fast Johnson-Lindenstrauss transform \cite{ailon2009fast} enable the
+sketched data $(S A, S y)$ to be efficiently computed in $\cO(n \log n)$ time.
+The sketching matrix $S \in \RR^{m \times n}$ is drawn from a ROS ensemble by i.i.d.\ sampling
+rows of $\sqrt{n} H D$ where $H \in \RR^{n \times n}$ is an orthonormal matrix (Hadamard
+in our experiments) and $D = \diag(\eps)$ with $\eps$ a $n$-dimensional Rademacher random variable.
+
+
+\section{Experiments}
+
+\subsection{Sub-optimality of sketched least-squares}
+
+We generated instances of least-square problems by sampling
+$A \in \RR^{n \times d}$ with i.i.d. $N(0,1)$ entries,
+target vector $x^*$ uniformly random from the sphere $\cS^{d-1}$,
+and observed responses $y = A x^* + \eps$ where $\eps \sim N(0, I_n)$.
+
+Taking $n = 100d$, least-squares theory yields that the error
+\begin{align}
+  \|x^{LS} - x^*\|_A \asymp \frac{d}{n} \approx 0.10
+\end{align}
+By Corollary 2 of \cite{pilanci2016iterative}, running IHS for $N = 5$ iterations
+and using $m = 6d$ samples per iteration should with high probability yield a sketched solution $\hat{x}$
+satisfying the error bound
+\begin{align}
+  \|\hat{x} - x^*\|_2 \leq c_0 \sqrt{\frac{d}{n}}
+\end{align}
+for some universal constant $c_0 > 0$. This is confirmed by the blue bars in \cref{fig:ls},
+which show that $\|\hat{x} - x^*\|_A \approx 0.11$ and that the
+full least-squares error (red bars) $\|x^{LS} - x^*\|_A \approx 0.10$.
+The green bars show the result of running the na\"ive sketched least-squares
+with dimension $m \times N = 24 d$ corresponding to the total number of samples
+used across all iterations of IHS.
+
+\begin{figure}[htpb]
+  \centering
+  \includegraphics[width=0.5\linewidth]{./ls.pdf}
+  \caption{Comparison of IHS versus na\"ive sketched least-squares (SLS) averaged
+    over 10 trials.
+    IHS consistently obtains lower error than SLS, and is close to the least-squares (LS)
+    estimate despite projecting the Hessian dimension down from $n=100d$ to $m=6d$.}
+  \label{fig:ls}
+\end{figure}
+
+\subsection{Interior-point methods}
+
+IHS can be applied to interior point methods, generalizing its applicability
+to problems with arbitrary convex constraints. The log barrier interior-point method
+solves a smooth convex problem
+\begin{align}
+  \min_{x \in \RR^d} f_0(x) \quad\text{subject to}\quad g_j(x) \leq 0 \quad\text{for}~j=1,\ldots,r
+\end{align}
+by solving a sequence of problems of the form
+\begin{align}
+  \hat{x}(\mu) &\coloneqq \argmin_{x \in \RR^d} \left\{
+    \mu f_0(x) - \sum^{r}_{j=1} \log(-g_j(x))
+  \right\}
+\end{align}
+for increasing $\mu \geq 1$. Unlike the simplex algorithm, which maintains tightness of a subset of constraints at all
+times, the sequence of solutions visited by thelog-barrier method traces out a
+\emph{central path} $\{\hat{x}(\mu)\}_{\mu \geq 1}$ through the interior of the feasible region.
+
+When IHS is used to solve for $\hat{x}(\mu)$, we can obtain faster interior point
+solvers with strong worst-case complexity results. \Cref{fig:central-path}
+illustrates IHS interior-point used to solve a LP: note that
+sketching results in deviations from the central path, but the algorithm still finds the same
+optimal solution. Furthermore, as the sketch dimension increases, the path taken
+converges to the central path.
+
+\begin{figure}[htpb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{./lp-central-path.pdf}
+  \caption{}
+  \label{fig:central-path}
+\end{figure}
+
+In \cref{fig:lp} we illustrate the optimality gap of the IHS interior-point method
+compared to that of the non-sketched method. The noise introduced by randomly
+sampling manifests in the non-monotonic decrease of the gap. As the sketching
+dimension increases, we see that the algorithm converges to successively more
+accurate solutions.
+
+\begin{figure}[htpb]
+  \centering
+  \includegraphics[width=0.5\linewidth]{./lp.pdf}
+  \caption{}
+  \label{fig:lp}
+\end{figure}
+
+\subsection{Logistic regression}
+
+We now consider some numerical comparisons of IHS with other popular
+optimizaton methods for large-scale logistic regression.
+We consider problems with $d = 100$ features and $n = 2^{16} = 65536$ observations
+by generating a data matrix $A \in \RR^{n \times d}$ where each row
+$a_i \sim N(0, \Sigma)$ where $\Sigma$ has $1$s on the diagonal and $\rho \in [0,1)$
+on the off-diagonal. This allows us to use $\rho$ to control the condition number of the problem.
+For logistic regression, the problem is to optimize
+\begin{align}
+  \min_{x \in \RR^d} \sum_{i=1}^n \log(1 + \exp(a_i^\tp x y_i))
+\end{align}
+
+For IHS, we use ROS sketches with $m = 4d$. We also considered:
+\begin{itemize}
+  \item Broyden-Fletcher-Goldfarb-Shanno (BFGS) (Scipy's implementation)
+  \item Truncated Newton CG (TNC)
+  \item Exact Newton trust-region (trust-exact)
+\end{itemize}
+
+
+\begin{figure}[htpb]
+  \centering
+  \includegraphics[width=0.95\linewidth]{./logreg.pdf}
+  \caption{}
+  \label{fig:}
+\end{figure}
+
+\section{Conclusion}
+
+\printbibliography
+
+\end{document}

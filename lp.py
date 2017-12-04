@@ -6,6 +6,8 @@ from numpy import random
 from scipy import linalg
 from scipy import optimize
 
+from fjlt import fjlt_usp
+
 np.random.seed(42)
 
 def plot_region(ax, A, b):
@@ -67,17 +69,14 @@ c = np.array([-3, -1], dtype=float)
 def log_barrier_obj(x, tau):
     return tau * anp.dot(c, x) - anp.sum(anp.log(b - anp.dot(A, x)))
 
-def sketched_hess_sqrt(x, m):
-    R = np.diag(random.binomial(1, 0.5, size=n))
-    H = linalg.hadamard(n)
-    S = np.sqrt(n/m) * \
-            np.dot(
-                    H[random.choice(n, size=m, replace=False),:],
-                    R)
-    return S.dot(np.diag(1.0 / np.abs(b - A.dot(x)))).dot(A)
+def hess_sqrt(x, A):
+    hess_sqrt = A.transpose() * (1.0 / np.abs(b - A.dot(x)))
+    hess_sqrt = hess_sqrt.transpose()
+    return hess_sqrt
 
-def hess_sqrt(x):
-    return np.diag(1.0 / np.abs(b - A.dot(x))).dot(A)
+def sketched_hess_sqrt(x, m, A):
+    sketched = np.sqrt(A.shape[0]) * fjlt_usp(hess_sqrt(x, A), m)
+    return sketched
 
 def compute_traj(hess_fn):
     path = []
@@ -88,10 +87,15 @@ def compute_traj(hess_fn):
         path.append(x)
         while True:
             SH = hess_fn(x)
-            step, _, _, _ = linalg.lstsq(SH.transpose().dot(SH), jac(x))
-            if np.any(b - np.dot(A, x - step) <= 0) or linalg.norm(step) < 1e-2:
+            step = linalg.solve(SH.transpose().dot(SH), jac(x))
+            newton_dec = np.dot(jac(x), step)
+            mu = 1
+            while np.dot(c, x - mu * step) > np.dot(c, x) + 0.1 * mu * newton_dec \
+                    or np.any(np.dot(A, x - mu * step) > b): # constraint violation
+                mu *= 0.5
+            x = x - mu * step
+            if mu * newton_dec < 1e-2:
                 break
-            x = x - step
         tau *= 1.1
     return np.array(path)
 
@@ -102,14 +106,15 @@ def plot_path(ax, path, color, label):
             scale_units='xy', angles='xy', scale=1, width=0.003, color=color, label=label)
 
 lp_opt = optimize.linprog(c, A, b)
-ip_path = compute_traj(hess_sqrt)
+ip_path = compute_traj(lambda x: hess_sqrt(x, A))
 
-fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(12, 8))
-for row, m in enumerate([2, 4, 8, 16]):
+fig, axes = plt.subplots(nrows=4, ncols=3, figsize=(8, 10))
+ms = [2, 4, 8, 16]
+for row, m in enumerate(ms):
     for trial in range(3):
         ax = axes[row][trial]
         plot_region(ax, A, b)
-        ip_sketch_path = compute_traj(lambda x: sketched_hess_sqrt(x, m))
+        ip_sketch_path = compute_traj(lambda x: sketched_hess_sqrt(x, m, A))
         ax.plot(lp_opt.x[0], lp_opt.x[1], 'g*', markersize=3)
         plot_path(ax, ip_path, 'r', label="Exact Newton")
         plot_path(ax, ip_sketch_path, 'b', label="Newton Sketch")
@@ -122,22 +127,27 @@ for row, m in enumerate([2, 4, 8, 16]):
             handles, labels = ax.get_legend_handles_labels()
             fig.legend(handles, labels, loc='upper center')
 fig.tight_layout()
+plt.savefig("lp-central-path.pdf", dpi=150)
 plt.show()
 
-plt.figure(1)
+plt.figure(1, figsize=(6,4))
+for m in ms:
+    print(m)
+    ip_sketch_path = np.array([compute_traj(lambda x: sketched_hess_sqrt(x, m, A)) for _ in range(10)]).mean(axis=0)
+    plt.semilogy(
+            np.arange(ip_sketch_path.shape[0]),
+            ip_sketch_path.dot(c) - lp_opt.fun,
+            label="Sketched Hessian (m = {})".format(m)
+    )
 plt.semilogy(
         np.arange(ip_path.shape[0]),
         ip_path.dot(c) - lp_opt.fun,
         label="Exact Hessian")
 
-for m in [2, 4, 8, 16]:
-    print(m)
-    ip_sketch_path = np.array([compute_traj(lambda x: sketched_hess_sqrt(x, m)) for _ in range(10)]).mean(axis=0)
-    plt.semilogy(
-            np.arange(ip_sketch_path.shape[0]),
-            ip_sketch_path.dot(c) - lp_opt.fun,
-            label="Sketched Hessian (10 trial average, m = {})".format(m)
-    )
+plt.xlabel("Num. iterations")
+plt.ylabel("Optimality gap")
 plt.legend()
 plt.grid()
+fig.tight_layout()
+plt.savefig("lp.pdf", dpi=150)
 plt.show()
